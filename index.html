@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#263522">
+<title>荒野求生</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#10150f;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;touch-action:none}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+#hud{position:fixed;inset:0;color:#fff;pointer-events:none;text-shadow:0 1px 3px #000}
+.box{background:#172016cc;border:1px solid #ffffff22;border-radius:13px;padding:9px 11px;backdrop-filter:blur(6px)}
+#stats{position:absolute;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));width:205px;font-size:13px}
+.bar{height:11px;background:#111a;border-radius:8px;margin:3px 0 6px;overflow:hidden}.fill{height:100%}
+.hp{background:#d94b42}.food{background:#d5a13c}.san{background:#7a8fc5}
+#day{position:absolute;right:max(10px,env(safe-area-inset-right));top:max(10px,env(safe-area-inset-top));text-align:right;font-size:13px}
+#hint{position:absolute;left:50%;top:13px;transform:translateX(-50%);font-size:12px;white-space:nowrap}
+#joy{position:absolute;left:max(18px,env(safe-area-inset-left));bottom:max(18px,env(safe-area-inset-bottom));width:140px;height:140px;border-radius:50%;background:#0005;border:1px solid #fff2;pointer-events:auto}
+#knob{position:absolute;left:39px;top:39px;width:62px;height:62px;border-radius:50%;background:#ffffff38;border:1px solid #fff5}
+#buttons{position:absolute;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));display:flex;gap:9px;pointer-events:auto}
+button{width:64px;height:64px;border-radius:50%;border:1px solid #ffffff33;background:#172016dd;color:white;font-weight:700;font-size:13px;box-shadow:0 4px 12px #0006}
+button:active{transform:scale(.93)}
+#toast{position:absolute;left:50%;bottom:28%;transform:translate(-50%,50%);padding:9px 14px;border-radius:10px;background:#111d;color:white;opacity:0;transition:.2s}
+#menu{position:fixed;inset:0;background:linear-gradient(#182318ee,#0b100bee);display:flex;align-items:center;justify-content:center;z-index:10}
+.card{width:min(500px,88vw);padding:28px;border-radius:22px;background:#20291ddd;border:1px solid #ffffff22;text-align:center;color:#fff}
+.card h1{font-size:32px;margin:0 0 8px}.card p{line-height:1.65;color:#d4d9d1}.start{width:190px;height:52px;border-radius:14px;background:#718d4f;margin-top:8px}
+.small{font-size:11px;color:#aeb5aa;margin-top:12px}
+@media (orientation:portrait){#hint{top:75px}.card h1{font-size:27px}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+ <div id="stats" class="box">
+  ❤️ <span id="hpv">100</span><div class="bar"><div id="hp" class="fill hp"></div></div>
+  🍖 <span id="foodv">100</span><div class="bar"><div id="food" class="fill food"></div></div>
+  🧠 <span id="sanv">100</span><div class="bar"><div id="san" class="fill san"></div></div>
+  🪵 <b id="wood">0</b>　🪨 <b id="stone">0</b>　🍓 <b id="berry">0</b>
+ </div>
+ <div id="day" class="box">第 <b id="dn">1</b> 天<br><span id="phase">白天</span></div>
+ <div id="hint" class="box">左侧移动 · 靠近资源后使用右侧按钮</div>
+ <div id="joy"><div id="knob"></div></div>
+ <div id="buttons"><button id="act">采集</button><button id="eat">进食</button><button id="fire">火堆</button></div>
+ <div id="toast"></div>
+</div>
+<div id="menu"><div class="card">
+ <h1 id="title">荒野求生</h1>
+ <p id="desc">在荒野中尽可能活下去。收集木材、石头和浆果，保持生命、饥饿与精神状态。</p>
+ <button class="start" id="start">开始游戏</button>
+ <div class="small">iPhone：建议横屏使用 · Safari 中运行</div>
+</div></div>
+<script>
+"use strict";
+const canvas=document.getElementById("c"),ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=1,last=0,running=false;
+let clock=0,day=1,fire=0;
+const p={x:0,y:0,hp:100,food:100,san:100};
+const inv={wood:0,stone:0,berry:0};
+let trees=[],rocks=[],berries=[],grass=[];
+const joy={x:0,y:0,active:false,id:null};
+const $=id=>document.getElementById(id);
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener("resize",resize);resize();
+const R=(a,b)=>Math.random()*(b-a)+a;
+function reset(){
+ p.x=p.y=0;p.hp=p.food=p.san=100;inv.wood=inv.stone=inv.berry=0;clock=0;day=1;fire=0;
+ trees=[];rocks=[];berries=[];grass=[];
+ for(let i=0;i<80;i++)trees.push({x:R(-1800,1800),y:R(-1300,1300),r:R(18,29),hp:2});
+ for(let i=0;i<65;i++)rocks.push({x:R(-1800,1800),y:R(-1300,1300),r:R(12,20),hp:2});
+ for(let i=0;i<55;i++)berries.push({x:R(-1700,1700),y:R(-1200,1200),ready:true});
+ for(let i=0;i<260;i++)grass.push({x:R(-1900,1900),y:R(-1400,1400),r:R(1,4)});
+}
+function msg(s){let e=$("toast");e.textContent=s;e.style.opacity=1;clearTimeout(msg.t);msg.t=setTimeout(()=>e.style.opacity=0,1100)}
+function near(list,max=90){
+ let best=null,bd=max;
+ for(const o of list){let d=Math.hypot(o.x-p.x,o.y-p.y);if(d<bd){bd=d;best=o}}
+ return best;
+}
+function collect(){
+ let choices=[];
+ let t=near(trees),r=near(rocks),b=near(berries);
+ if(t)choices.push([Math.hypot(t.x-p.x,t.y-p.y),"tree",t]);
+ if(r)choices.push([Math.hypot(r.x-p.x,r.y-p.y),"rock",r]);
+ if(b)choices.push([Math.hypot(b.x-p.x,b.y-p.y),"berry",b]);
+ choices.sort((a,b)=>a[0]-b[0]);
+ if(!choices.length){msg("附近没有资源");return}
+ const q=choices[0];
+ if(q[1]=="tree"){inv.wood++;q[2].hp--;msg("🪵 木材 +1");if(q[2].hp<=0)trees.splice(trees.indexOf(q[2]),1)}
+ if(q[1]=="rock"){inv.stone++;q[2].hp--;msg("🪨 石头 +1");if(q[2].hp<=0)rocks.splice(rocks.indexOf(q[2]),1)}
+ if(q[1]=="berry"){if(q[2].ready){inv.berry+=2;q[2].ready=false;msg("🍓 浆果 +2")}else msg("浆果还没成熟")}
+}
+function eat(){if(inv.berry){inv.berry--;p.food=Math.min(100,p.food+28);p.san=Math.min(100,p.san+2);msg("吃下浆果")}else msg("没有食物")}
+function buildFire(){if(inv.wood>=3&&inv.stone>=2){inv.wood-=3;inv.stone-=2;fire=45;msg("🔥 火堆已点燃")}else msg("需要 3 木材 + 2 石头")}
+function update(dt){
+ let x=joy.x,y=joy.y,len=Math.hypot(x,y);if(len>1){x/=len;y/=len}
+ p.x+=x*155*dt;p.y+=y*155*dt;
+ clock+=dt;if(clock>=60){clock-=60;day++}
+ fire=Math.max(0,fire-dt);
+ p.food=Math.max(0,p.food-dt*.35);
+ if(p.food===0)p.hp=Math.max(0,p.hp-dt*1.35);else p.hp=Math.min(100,p.hp+dt*.04);
+ if(fire>0)p.san=Math.min(100,p.san+dt*.5);else p.san=Math.max(0,p.san-dt*.08);
+ for(const b of berries)if(!b.ready&&Math.random()<dt/16)b.ready=true;
+ if(p.hp<=0){running=false;$("menu").style.display="flex";$("title").textContent="你倒下了";$("desc").innerHTML="你坚持了 <b>"+day+" 天</b>。<br>再次开始，挑战更久的生存时间。";$("start").textContent="重新开始"}
+ $("hpv").textContent=Math.ceil(p.hp);$("foodv").textContent=Math.ceil(p.food);$("sanv").textContent=Math.ceil(p.san);
+ $("hp").style.width=p.hp+"%";$("food").style.width=p.food+"%";$("san").style.width=p.san+"%";
+ $("wood").textContent=inv.wood;$("stone").textContent=inv.stone;$("berry").textContent=inv.berry;$("dn").textContent=day;$("phase").textContent=clock<36?"白天":"夜晚";
+}
+function pos(o){return{x:o.x-p.x+W/2,y:o.y-p.y+H/2}}
+function draw(){
+ ctx.clearRect(0,0,W,H);ctx.fillStyle="#708c54";ctx.fillRect(0,0,W,H);
+ for(const g of grass){let s=pos(g);if(s.x>-8&&s.x<W+8&&s.y>-8&&s.y<H+8){ctx.fillStyle="#617e49";ctx.beginPath();ctx.arc(s.x,s.y,g.r,0,7);ctx.fill()}}
+ for(const t of trees){let s=pos(t);if(s.x<-50||s.x>W+50||s.y<-70||s.y>H+70)continue;ctx.fillStyle="#4a3422";ctx.fillRect(s.x-4,s.y+8,8,27);ctx.fillStyle="#2b5b3c";ctx.beginPath();ctx.arc(s.x,s.y,t.r,0,7);ctx.fill();ctx.fillStyle="#3b7045";ctx.beginPath();ctx.arc(s.x-9,s.y+4,t.r*.62,0,7);ctx.fill()}
+ for(const r of rocks){let s=pos(r);if(s.x<-40||s.x>W+40||s.y<-40||s.y>H+40)continue;ctx.fillStyle="#777970";ctx.beginPath();ctx.ellipse(s.x,s.y,r.r,r.r*.68,0,0,7);ctx.fill()}
+ for(const b of berries){let s=pos(b);if(s.x<-30||s.x>W+30||s.y<-30||s.y>H+30)continue;ctx.fillStyle="#315d37";ctx.beginPath();ctx.arc(s.x,s.y,15,0,7);ctx.fill();if(b.ready){ctx.fillStyle="#a83d4b";for(let i=0;i<3;i++){ctx.beginPath();ctx.arc(s.x+R(-7,7),s.y+R(-5,5),3,0,7);ctx.fill()}}}
+ if(fire>0){ctx.fillStyle="#49382a";ctx.fillRect(W/2-14,H/2+8,28,6);ctx.fillStyle="#f28c2e";ctx.beginPath();ctx.arc(W/2,H/2+2,11,0,7);ctx.fill();ctx.fillStyle="#ffd75b";ctx.beginPath();ctx.arc(W/2,H/2-2,6,0,7);ctx.fill()}
+ ctx.fillStyle="#e2bf87";ctx.beginPath();ctx.arc(W/2,H/2-5,13,0,7);ctx.fill();ctx.fillStyle="#5b3b2b";ctx.beginPath();ctx.arc(W/2,H/2-12,14,Math.PI,7);ctx.fill();ctx.fillStyle="#38533b";ctx.fillRect(W/2-10,H/2+8,20,18);
+ if(clock>=36){ctx.fillStyle="rgba(9,16,38,.56)";ctx.fillRect(0,0,W,H)}
+}
+function loop(t){let dt=Math.min(.05,(t-last||0)/1000);last=t;if(running)update(dt);draw();requestAnimationFrame(loop)}
+$("start").onclick=()=>{reset();running=true;$("menu").style.display="none";msg("开始探索！")};
+$("act").onclick=collect;$("eat").onclick=eat;$("fire").onclick=buildFire;
+
+const joyEl=$("joy"),knob=$("knob");
+function moveJoy(e){let r=joyEl.getBoundingClientRect(),dx=e.clientX-(r.left+r.width/2),dy=e.clientY-(r.top+r.height/2),m=47,l=Math.hypot(dx,dy);if(l>m){dx=dx/l*m;dy=dy/l*m}joy.x=dx/m;joy.y=dy/m;knob.style.transform=`translate(${dx}px,${dy}px)`}
+joyEl.onpointerdown=e=>{joy.active=true;joy.id=e.pointerId;joyEl.setPointerCapture(e.pointerId);moveJoy(e)};
+joyEl.onpointermove=e=>{if(joy.active&&e.pointerId===joy.id)moveJoy(e)};
+function endJoy(e){if(e.pointerId===joy.id){joy.active=false;joy.x=joy.y=0;knob.style.transform="translate(0,0)"}}
+joyEl.onpointerup=endJoy;joyEl.onpointercancel=endJoy;
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
